@@ -18,9 +18,15 @@ type UnmarshalTypeError struct {
 	Value  string
 	Type   reflect.Type
 	Offset int64
+	Struct string // name of the outermost struct containing the field, if any
+	Field  string // dotted path of the field within that struct, if any
 }
 
 func (e *UnmarshalTypeError) Error() string {
+	if e.Struct != "" || e.Field != "" {
+		return fmt.Sprintf("jsonx: cannot unmarshal %s into Go struct field %s.%s of type %s",
+			e.Value, e.Struct, e.Field, e.Type)
+	}
 	return fmt.Sprintf("jsonx: cannot unmarshal %s into Go value of type %s", e.Value, e.Type)
 }
 

@@ -104,17 +104,75 @@ func buildDecoder(t reflect.Type) typedDecodeFn {
 
 // -------- scalar decoders --------
 
+// classifyMismatch maps a leading JSON byte to the value-name used in
+// *UnmarshalTypeError. Returns "" if the byte does not begin a JSON value
+// (i.e. true syntax error, not a type mismatch). Note: 'n' (null) is
+// intentionally omitted — the scalar decoders that accept null-as-zero
+// intercept it earlier, and decoders that don't currently support null
+// keep their pre-existing syntax-error semantics.
+func classifyMismatch(c byte) string {
+	switch {
+	case c == '[':
+		return "array"
+	case c == '{':
+		return "object"
+	case c == '"':
+		return "string"
+	case c == 't' || c == 'f':
+		return "bool"
+	case c == '-' || (c >= '0' && c <= '9'):
+		return "number"
+	}
+	return ""
+}
+
+// Cached reflect.Type values for scalar decoders. Filled into
+// *UnmarshalTypeError so callers see the concrete Go type that mismatched.
+var (
+	stringType  = reflect.TypeOf("")
+	boolType    = reflect.TypeOf(false)
+	intType     = reflect.TypeOf(int(0))
+	int8Type    = reflect.TypeOf(int8(0))
+	int16Type   = reflect.TypeOf(int16(0))
+	int32Type   = reflect.TypeOf(int32(0))
+	int64Type   = reflect.TypeOf(int64(0))
+	uintType    = reflect.TypeOf(uint(0))
+	uint8Type   = reflect.TypeOf(uint8(0))
+	uint16Type  = reflect.TypeOf(uint16(0))
+	uint32Type  = reflect.TypeOf(uint32(0))
+	uint64Type  = reflect.TypeOf(uint64(0))
+	float32Type = reflect.TypeOf(float32(0))
+	float64Type = reflect.TypeOf(float64(0))
+)
+
+// fillType sets Type on a *UnmarshalTypeError when not already populated.
+// Used by typed wrappers (decInt8, etc.) over shared parsers (readInt) so
+// the error reports the concrete target type.
+func fillType(err error, t reflect.Type) error {
+	if ute, ok := err.(*UnmarshalTypeError); ok && ute.Type == nil {
+		ute.Type = t
+	}
+	return err
+}
+
 func decString(d *decoder, p unsafe.Pointer) error {
 	d.skipWS()
 	if d.p >= len(d.data) {
 		return syntaxErr("expected string", d.p)
 	}
-	if d.data[d.p] == 'n' {
+	c := d.data[d.p]
+	if c == 'n' {
 		if err := d.decodeNull(); err != nil {
 			return err
 		}
 		*(*string)(p) = ""
 		return nil
+	}
+	if c != '"' {
+		if v := classifyMismatch(c); v != "" {
+			return &UnmarshalTypeError{Value: v, Type: stringType, Offset: int64(d.p)}
+		}
+		return syntaxErr("expected string", d.p)
 	}
 	s, err := d.decodeString()
 	if err != nil {
@@ -128,6 +186,16 @@ func decString(d *decoder, p unsafe.Pointer) error {
 
 func decBool(d *decoder, p unsafe.Pointer) error {
 	d.skipWS()
+	if d.p >= len(d.data) {
+		return syntaxErr("expected bool", d.p)
+	}
+	c := d.data[d.p]
+	if c != 't' && c != 'f' {
+		if v := classifyMismatch(c); v != "" {
+			return &UnmarshalTypeError{Value: v, Type: boolType, Offset: int64(d.p)}
+		}
+		// fall through to decodeBool for the canonical syntax error
+	}
 	b, err := d.decodeBool()
 	if err != nil {
 		return err
@@ -139,7 +207,7 @@ func decBool(d *decoder, p unsafe.Pointer) error {
 func decInt(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readInt()
 	if err != nil {
-		return err
+		return fillType(err, intType)
 	}
 	*(*int)(p) = int(n)
 	return nil
@@ -147,7 +215,7 @@ func decInt(d *decoder, p unsafe.Pointer) error {
 func decInt8(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readInt()
 	if err != nil {
-		return err
+		return fillType(err, int8Type)
 	}
 	*(*int8)(p) = int8(n)
 	return nil
@@ -155,7 +223,7 @@ func decInt8(d *decoder, p unsafe.Pointer) error {
 func decInt16(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readInt()
 	if err != nil {
-		return err
+		return fillType(err, int16Type)
 	}
 	*(*int16)(p) = int16(n)
 	return nil
@@ -163,7 +231,7 @@ func decInt16(d *decoder, p unsafe.Pointer) error {
 func decInt32(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readInt()
 	if err != nil {
-		return err
+		return fillType(err, int32Type)
 	}
 	*(*int32)(p) = int32(n)
 	return nil
@@ -171,7 +239,7 @@ func decInt32(d *decoder, p unsafe.Pointer) error {
 func decInt64(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readInt()
 	if err != nil {
-		return err
+		return fillType(err, int64Type)
 	}
 	*(*int64)(p) = n
 	return nil
@@ -179,7 +247,7 @@ func decInt64(d *decoder, p unsafe.Pointer) error {
 func decUint(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readUint()
 	if err != nil {
-		return err
+		return fillType(err, uintType)
 	}
 	*(*uint)(p) = uint(n)
 	return nil
@@ -187,7 +255,7 @@ func decUint(d *decoder, p unsafe.Pointer) error {
 func decUint8(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readUint()
 	if err != nil {
-		return err
+		return fillType(err, uint8Type)
 	}
 	*(*uint8)(p) = uint8(n)
 	return nil
@@ -195,7 +263,7 @@ func decUint8(d *decoder, p unsafe.Pointer) error {
 func decUint16(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readUint()
 	if err != nil {
-		return err
+		return fillType(err, uint16Type)
 	}
 	*(*uint16)(p) = uint16(n)
 	return nil
@@ -203,7 +271,7 @@ func decUint16(d *decoder, p unsafe.Pointer) error {
 func decUint32(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readUint()
 	if err != nil {
-		return err
+		return fillType(err, uint32Type)
 	}
 	*(*uint32)(p) = uint32(n)
 	return nil
@@ -211,12 +279,21 @@ func decUint32(d *decoder, p unsafe.Pointer) error {
 func decUint64(d *decoder, p unsafe.Pointer) error {
 	n, err := d.readUint()
 	if err != nil {
-		return err
+		return fillType(err, uint64Type)
 	}
 	*(*uint64)(p) = n
 	return nil
 }
 func decFloat32(d *decoder, p unsafe.Pointer) error {
+	d.skipWS()
+	if d.p < len(d.data) {
+		c := d.data[d.p]
+		if c != '-' && (c < '0' || c > '9') && c != 'n' {
+			if v := classifyMismatch(c); v != "" {
+				return &UnmarshalTypeError{Value: v, Type: float32Type, Offset: int64(d.p)}
+			}
+		}
+	}
 	raw, err := d.decodeNumberSlice()
 	if err != nil {
 		return err
@@ -230,6 +307,14 @@ func decFloat32(d *decoder, p unsafe.Pointer) error {
 }
 func decFloat64(d *decoder, p unsafe.Pointer) error {
 	d.skipWS()
+	if d.p < len(d.data) {
+		c := d.data[d.p]
+		if c != '-' && (c < '0' || c > '9') && c != 'n' {
+			if v := classifyMismatch(c); v != "" {
+				return &UnmarshalTypeError{Value: v, Type: float64Type, Offset: int64(d.p)}
+			}
+		}
+	}
 	v, err := d.scanNumber()
 	if err != nil {
 		return err
@@ -252,6 +337,14 @@ func (d *decoder) readInt() (int64, error) {
 			return 0, err
 		}
 		return 0, nil
+	}
+	// Type-mismatch fast path: anything that's a valid JSON value start but
+	// not a number gets an *UnmarshalTypeError (Type filled by the caller).
+	if c := b[p]; c != '-' && (c < '0' || c > '9') {
+		if v := classifyMismatch(c); v != "" {
+			return 0, &UnmarshalTypeError{Value: v, Offset: int64(p)}
+		}
+		return 0, syntaxErr("invalid int", p)
 	}
 	neg := false
 	if b[p] == '-' {
@@ -355,7 +448,11 @@ func buildSliceDecoder(t reflect.Type) typedDecodeFn {
 			return nil
 		}
 		if d.data[d.p] != '[' {
-			return &UnmarshalTypeError{Value: "non-array", Type: tt, Offset: int64(d.p)}
+			v := classifyMismatch(d.data[d.p])
+			if v == "" {
+				v = "non-array"
+			}
+			return &UnmarshalTypeError{Value: v, Type: tt, Offset: int64(d.p)}
 		}
 		d.p++
 		// Element decoders do their own leading skipWS; merging that with
@@ -449,7 +546,14 @@ func buildArrayDecoder(t reflect.Type) typedDecodeFn {
 	return func(d *decoder, p unsafe.Pointer) error {
 		d.skipWS()
 		if d.p >= len(d.data) || d.data[d.p] != '[' {
-			return &UnmarshalTypeError{Value: "non-array", Type: tt, Offset: int64(d.p)}
+			v := ""
+			if d.p < len(d.data) {
+				v = classifyMismatch(d.data[d.p])
+			}
+			if v == "" {
+				v = "non-array"
+			}
+			return &UnmarshalTypeError{Value: v, Type: tt, Offset: int64(d.p)}
 		}
 		d.p++
 		d.skipWS()
