@@ -2,9 +2,11 @@ package jsonx
 
 import "encoding/base64"
 
-func base64Decode(s string) ([]byte, error) {
+func base64DecodeBytes(src []byte) ([]byte, error) {
 	// encoding/json uses std base64 with padding.
-	return base64.StdEncoding.DecodeString(s)
+	dst := make([]byte, base64.StdEncoding.DecodedLen(len(src)))
+	n, err := base64.StdEncoding.Decode(dst, src)
+	return dst[:n], err
 }
 
 func base64Encode(dst []byte, src []byte) []byte {

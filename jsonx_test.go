@@ -52,6 +52,106 @@ func TestUnmarshalInterface(t *testing.T) {
 	}
 }
 
+func TestUnmarshalByteSliceAvoidsBase64SourceCopy(t *testing.T) {
+	data := []byte(`"SGVsbG8sIHdvcmxkIQ=="`)
+	var warm []byte
+	if err := Unmarshal(data, &warm); err != nil {
+		t.Fatal(err)
+	}
+	if string(warm) != "Hello, world!" {
+		t.Fatalf("decoded %q", warm)
+	}
+
+	var last []byte
+	var err error
+	allocs := testing.AllocsPerRun(1000, func() {
+		var got []byte
+		err = Unmarshal(data, &got)
+		last = got
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(last) != "Hello, world!" {
+		t.Fatalf("decoded %q", last)
+	}
+	if allocs > 2 {
+		t.Fatalf("allocs = %.0f, want <= 2", allocs)
+	}
+}
+
+func TestUnmarshalEscapedByteSliceAvoidsStringCopy(t *testing.T) {
+	data := []byte(`"\u0053GVsbG8sIHdvcmxkIQ=="`)
+	var warm []byte
+	if err := Unmarshal(data, &warm); err != nil {
+		t.Fatal(err)
+	}
+	if string(warm) != "Hello, world!" {
+		t.Fatalf("decoded %q", warm)
+	}
+
+	var last []byte
+	var err error
+	allocs := testing.AllocsPerRun(1000, func() {
+		var got []byte
+		err = Unmarshal(data, &got)
+		last = got
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(last) != "Hello, world!" {
+		t.Fatalf("decoded %q", last)
+	}
+	if allocs > 2 {
+		t.Fatalf("allocs = %.0f, want <= 2", allocs)
+	}
+}
+
+func BenchmarkUnmarshalByteSlice_Jsonx(b *testing.B) {
+	data := []byte(`"SGVsbG8sIHdvcmxkIQ=="`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var got []byte
+		if err := Unmarshal(data, &got); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalByteSlice_Stdlib(b *testing.B) {
+	data := []byte(`"SGVsbG8sIHdvcmxkIQ=="`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var got []byte
+		if err := encjson.Unmarshal(data, &got); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalEscapedByteSlice_Jsonx(b *testing.B) {
+	data := []byte(`"\u0053GVsbG8sIHdvcmxkIQ=="`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var got []byte
+		if err := Unmarshal(data, &got); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalEscapedByteSlice_Stdlib(b *testing.B) {
+	data := []byte(`"\u0053GVsbG8sIHdvcmxkIQ=="`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var got []byte
+		if err := encjson.Unmarshal(data, &got); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // TestValid mirrors encoding/json's TestValid (scanner_test.go): a hand-picked
 // table of valid/invalid inputs. We then cross-check every case against the
 // stdlib so divergence (in either direction) is a test failure.

@@ -369,6 +369,7 @@ dependency.
 |---|-----------|--------|------|
 | X11 | Remove jsonx's eager copy before calling `json.Unmarshaler.UnmarshalJSON`; `encoding/json` documents that implementations must copy data themselves if they retain it. | Allocation drops without changing RawMessage behavior: `api.github.com.json` ~81.97 MB → ~78.60 MB, `stripe_openapi_spec3.json` ~81.07 MB → ~78.60 MB. CPU remains effectively tied with sonic because ~95 % of samples are in `go-openapi/spec` methods calling stdlib `encoding/json` internally. | ✓ |
 | X12 | Apply the same copy-elision rule to `encoding.TextUnmarshaler`: use `decodeStringRaw` so unescaped JSON strings are passed as decoded byte slices aliased into the input. | Focused TextUnmarshaler decode bench (`"123-456"`, 3s × 3): jsonx 126-139 ns/op, 56 B/op, 3 allocs/op vs stdlib 204-215 ns/op, 200 B/op, 4 allocs/op. | ✓ |
+| X13 | Decode typed `[]byte` fields through `decodeStringRaw` and `base64.StdEncoding.Decode(dst, raw)` instead of materializing a Go string before `DecodeString`. | Escaped base64 JSON string (`"\\u0053GV..."`, 3s × 3): jsonx ~150-160 ns/op, 64 B/op, 3 allocs/op → **123-135 ns/op, 40 B/op, 2 allocs/op**. Unescaped path remains 2 allocs/op. | ✓ |
 
 ### Post-change OpenAPI decode (`-benchtime=3s -count=3`)
 

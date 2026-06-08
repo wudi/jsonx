@@ -597,12 +597,12 @@ func decByteSlice(d *decoder, p unsafe.Pointer) error {
 		*(*[]byte)(p) = nil
 		return nil
 	}
-	s, err := d.decodeString()
+	raw, err := d.decodeStringRaw()
 	if err != nil {
 		return err
 	}
 	// base64 decoding
-	out, err := base64Decode(s)
+	out, err := base64DecodeBytes(raw)
 	if err != nil {
 		return err
 	}
