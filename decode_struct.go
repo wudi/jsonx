@@ -17,6 +17,7 @@ type structField struct {
 }
 
 type structPlan struct {
+	name   string // t.Name() of the containing struct, used for error reporting
 	fields []structField
 }
 
@@ -33,7 +34,7 @@ func loadPrefix8(s string) uint64 {
 }
 
 func buildStructDecoder(t reflect.Type) typedDecodeFn {
-	plan := &structPlan{}
+	plan := &structPlan{name: t.Name()}
 	n := t.NumField()
 	for i := 0; i < n; i++ {
 		f := t.Field(i)
@@ -65,6 +66,25 @@ func buildStructDecoder(t reflect.Type) typedDecodeFn {
 	return func(d *decoder, p unsafe.Pointer) error {
 		return decodeStruct(d, p, plan)
 	}
+}
+
+// wrapStructField enriches a *UnmarshalTypeError returned from a field
+// decoder with the containing struct's name and the dotted field path.
+// Outer struct frames overwrite Struct to the outermost name and prepend
+// their field name onto Field, producing paths like "Outer.Inner.Name"
+// that mirror encoding/json's behavior.
+func wrapStructField(err error, structName, fieldName string) error {
+	ute, ok := err.(*UnmarshalTypeError)
+	if !ok {
+		return err
+	}
+	if ute.Field == "" {
+		ute.Field = fieldName
+	} else {
+		ute.Field = fieldName + "." + ute.Field
+	}
+	ute.Struct = structName
+	return err
 }
 
 func decodeStruct(d *decoder, p unsafe.Pointer, plan *structPlan) error {
@@ -139,7 +159,7 @@ func decodeStruct(d *decoder, p unsafe.Pointer, plan *structPlan) error {
 			// that's conclusive; otherwise compare the tail.
 			if klen <= 8 || f.name[8:] == b2sUnsafe(key[8:]) {
 				if err := f.dec(d, unsafe.Add(p, f.offset)); err != nil {
-					return err
+					return wrapStructField(err, plan.name, f.name)
 				}
 				found = true
 				break
