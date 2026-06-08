@@ -104,6 +104,12 @@ type invalidMarshaler struct{}
 
 func (invalidMarshaler) MarshalJSON() ([]byte, error) { return []byte(`{not json`), nil }
 
+type spacedHTMLMarshaler struct{}
+
+func (spacedHTMLMarshaler) MarshalJSON() ([]byte, error) {
+	return []byte("{ \"x\" : \"<tag>&\u2028\u2029\" }"), nil
+}
+
 // erroringUnmarshaler returns an error from UnmarshalJSON.
 type erroringUnmarshaler struct{}
 
@@ -219,6 +225,21 @@ func TestMarshaler_InvalidJSONReturned(t *testing.T) {
 	var me *MarshalerError
 	if !errors.As(err, &me) {
 		t.Fatalf("want *MarshalerError, got %T", err)
+	}
+}
+
+func TestMarshaler_CompactsAndEscapesReturnedJSON(t *testing.T) {
+	v := spacedHTMLMarshaler{}
+	got, err := Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := encjson.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("got %s want %s", got, want)
 	}
 }
 

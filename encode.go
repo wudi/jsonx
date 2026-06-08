@@ -77,110 +77,219 @@ func unsafePointerOf(rv reflect.Value) unsafe.Pointer {
 // -------- string writing --------
 
 var htmlEscape = [256]bool{'<': true, '>': true, '&': true}
+var stringSafeSet = func() [256]bool {
+	var safe [256]bool
+	for i := 0x20; i < utf8.RuneSelf; i++ {
+		c := byte(i)
+		safe[c] = c != '"' && c != '\\' && !htmlEscape[c]
+	}
+	return safe
+}()
 
 func (e *encoder) writeString(s string) {
+	e.buf = appendJSONString(e.buf, s)
+}
+
+func appendJSONString(dst []byte, s string) []byte {
 	n := len(s)
 	if n == 0 {
-		e.buf = append(e.buf, '"', '"')
-		return
+		return append(dst, '"', '"')
 	}
-	var i int
-	if hasFastScan && n >= 64 {
-		i = scanStringSIMD(unsafe.StringData(s), n)
-	} else {
-		// Inline 8-byte SWAR scan.
-		sp := unsafe.StringData(s)
-		for i+8 <= n {
-			w := *(*uint64)(unsafe.Pointer(uintptr(unsafe.Pointer(sp)) + uintptr(i)))
-			if hasQuoteOrBackslashOrCtl(w) {
-				break
-			}
-			i += 8
-		}
-		for i < n {
-			c := s[i]
-			if c == '"' || c == '\\' || c < 0x20 {
-				break
-			}
-			i++
-		}
-	}
+	i := scanString(unsafe.Pointer(unsafe.StringData(s)), n)
 	if i == n {
 		// Fast path: no escapes. One combined grow check + copy instead
 		// of three separate appends (each one does its own grow check +
 		// slice-header write, the latter provoking GC write barriers).
-		L := len(e.buf)
+		L := len(dst)
 		need := L + n + 2
-		if need <= cap(e.buf) {
-			buf := e.buf[:need]
+		if need <= cap(dst) {
+			buf := dst[:need]
 			buf[L] = '"'
 			copy(buf[L+1:], s)
 			buf[need-1] = '"'
-			e.buf = buf
-			return
+			return buf
 		}
 		// slow path via append (grows)
-		e.buf = append(e.buf, '"')
-		e.buf = append(e.buf, s...)
-		e.buf = append(e.buf, '"')
-		return
+		dst = append(dst, '"')
+		dst = append(dst, s...)
+		dst = append(dst, '"')
+		return dst
 	}
-	e.buf = append(e.buf, '"')
-	e.writeStringSlow(s, i)
+	dst = append(dst, '"')
+	return appendJSONStringSlow(dst, s, i)
 }
 
-func (e *encoder) writeStringSlow(s string, start int) {
-	// copy the already-scanned prefix
-	e.buf = append(e.buf, s[:start]...)
-	for i := start; i < len(s); {
+func stringEncodeBreakMask(w uint64) uint64 {
+	const lo = 0x0101010101010101
+	const hi = 0x8080808080808080
+	return stringBreakMask(w) |
+		byteEqMask(w, '<') |
+		byteEqMask(w, '>') |
+		byteEqMask(w, '&') |
+		(w & hi)
+}
+
+func byteEqMask(w uint64, c byte) uint64 {
+	const lo = 0x0101010101010101
+	const hi = 0x8080808080808080
+	x := w ^ (lo * uint64(c))
+	return (x - lo) & ^x & hi
+}
+
+func appendJSONStringSlow(dst []byte, s string, start int) []byte {
+	i := start
+	chunkStart := 0
+	for i < len(s) {
 		c := s[i]
-		if c < 0x20 {
-			switch c {
-			case '\n':
-				e.buf = append(e.buf, '\\', 'n')
-			case '\r':
-				e.buf = append(e.buf, '\\', 'r')
-			case '\t':
-				e.buf = append(e.buf, '\\', 't')
-			case '\b':
-				e.buf = append(e.buf, '\\', 'b')
-			case '\f':
-				e.buf = append(e.buf, '\\', 'f')
+		if c < utf8.RuneSelf {
+			if stringSafeSet[c] {
+				i++
+				continue
+			}
+			dst = append(dst, s[chunkStart:i]...)
+			switch {
+			case c == '"' || c == '\\':
+				dst = append(dst, '\\', c)
+			case c == '\n':
+				dst = append(dst, '\\', 'n')
+			case c == '\r':
+				dst = append(dst, '\\', 'r')
+			case c == '\t':
+				dst = append(dst, '\\', 't')
+			case c == '\b':
+				dst = append(dst, '\\', 'b')
+			case c == '\f':
+				dst = append(dst, '\\', 'f')
 			default:
-				e.buf = append(e.buf, '\\', 'u', '0', '0', hexChar[c>>4], hexChar[c&0xf])
+				dst = append(dst, '\\', 'u', '0', '0', hexChar[c>>4], hexChar[c&0xf])
 			}
 			i++
+			chunkStart = i
 			continue
 		}
-		if c == '"' {
-			e.buf = append(e.buf, '\\', '"')
-			i++
+		switch utf8SeqLen(s, i) {
+		case 2:
+			i += 2
+			continue
+		case 3:
+			if s[i] == 0xe2 && s[i+1] == 0x80 && s[i+2]&^1 == 0xa8 {
+				dst = append(dst, s[chunkStart:i]...)
+				dst = append(dst, '\\', 'u', '2', '0', '2', hexChar[s[i+2]&0xf])
+				i += 3
+				chunkStart = i
+				continue
+			}
+			i += 3
+			continue
+		case 4:
+			i += 4
 			continue
 		}
-		if c == '\\' {
-			e.buf = append(e.buf, '\\', '\\')
-			i++
-			continue
-		}
-		// handle valid UTF-8 fast
-		if c < utf8.RuneSelf {
-			e.buf = append(e.buf, c)
-			i++
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			e.buf = append(e.buf, '\\', 'u', 'f', 'f', 'f', 'd')
-			i++
-			continue
-		}
-		e.buf = append(e.buf, s[i:i+size]...)
-		i += size
+		dst = append(dst, s[chunkStart:i]...)
+		dst = append(dst, '\\', 'u', 'f', 'f', 'f', 'd')
+		i++
+		chunkStart = i
 	}
-	e.buf = append(e.buf, '"')
+	dst = append(dst, s[chunkStart:]...)
+	return append(dst, '"')
+}
+
+func utf8SeqLen(s string, i int) int {
+	c := s[i]
+	if c < 0xc2 {
+		return 0
+	}
+	if c < 0xe0 {
+		if i+1 < len(s) && isUTF8Cont(s[i+1]) {
+			return 2
+		}
+		return 0
+	}
+	if c < 0xf0 {
+		if i+2 >= len(s) {
+			return 0
+		}
+		c1, c2 := s[i+1], s[i+2]
+		if !isUTF8Cont(c1) || !isUTF8Cont(c2) {
+			return 0
+		}
+		if c == 0xe0 && c1 < 0xa0 {
+			return 0
+		}
+		if c == 0xed && c1 >= 0xa0 {
+			return 0
+		}
+		return 3
+	}
+	if c < 0xf5 {
+		if i+3 >= len(s) {
+			return 0
+		}
+		c1, c2, c3 := s[i+1], s[i+2], s[i+3]
+		if !isUTF8Cont(c1) || !isUTF8Cont(c2) || !isUTF8Cont(c3) {
+			return 0
+		}
+		if c == 0xf0 && c1 < 0x90 {
+			return 0
+		}
+		if c == 0xf4 && c1 >= 0x90 {
+			return 0
+		}
+		return 4
+	}
+	return 0
+}
+
+func isUTF8Cont(c byte) bool {
+	return c&0xc0 == 0x80
 }
 
 var hexChar = "0123456789abcdef"
+
+func appendCompactEscapedJSON(dst, src []byte) []byte {
+	inString := false
+	escape := false
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		if inString {
+			if escape {
+				dst = append(dst, c)
+				escape = false
+				continue
+			}
+			switch c {
+			case '\\':
+				dst = append(dst, c)
+				escape = true
+			case '"':
+				dst = append(dst, c)
+				inString = false
+			case '<', '>', '&':
+				dst = append(dst, '\\', 'u', '0', '0', hexChar[c>>4], hexChar[c&0xf])
+			case 0xe2:
+				if i+2 < len(src) && src[i+1] == 0x80 && src[i+2]&^1 == 0xa8 {
+					dst = append(dst, '\\', 'u', '2', '0', '2', hexChar[src[i+2]&0xf])
+					i += 2
+				} else {
+					dst = append(dst, c)
+				}
+			default:
+				dst = append(dst, c)
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+			dst = append(dst, c)
+		case ' ', '\t', '\n', '\r':
+			// compact insignificant whitespace
+		default:
+			dst = append(dst, c)
+		}
+	}
+	return dst
+}
 
 // appendIndented reformats compact JSON from src into dst, inserting newlines,
 // prefix, and per-level indent matching encoding/json.Indent semantics. src is

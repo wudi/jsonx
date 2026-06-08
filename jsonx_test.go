@@ -52,6 +52,47 @@ func TestUnmarshalInterface(t *testing.T) {
 	}
 }
 
+func TestMarshalEscapesHTMLLikeStdlib(t *testing.T) {
+	type tagged struct {
+		Value string `json:"a<b&c>"`
+	}
+	v := tagged{Value: "<tag>&\u2028\u2029"}
+	got, err := Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := encjson.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
+func TestMarshalInvalidUTF8LikeStdlib(t *testing.T) {
+	cases := []string{
+		string([]byte{'o', 'k', 0xff}),
+		string([]byte{'x', 0xe2, 0x28, 0xa1, 'y'}),
+		string([]byte{'x', 0xf0, 0x28, 0x8c, 0xbc, 'y'}),
+		string([]byte{'x', 0xed, 0xa0, 0x80, 'y'}),
+		string([]byte{'x', 0xe2, 0x80}),
+	}
+	for _, v := range cases {
+		got, err := Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := encjson.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("% x: got %s want %s", []byte(v), got, want)
+		}
+	}
+}
+
 func TestUnmarshalByteSliceAvoidsBase64SourceCopy(t *testing.T) {
 	data := []byte(`"SGVsbG8sIHdvcmxkIQ=="`)
 	var warm []byte

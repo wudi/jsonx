@@ -113,7 +113,7 @@ func buildMarshalerEncoder(t reflect.Type, ptrRecv bool) typedEncodeFn {
 				sourceFunc: "MarshalJSON",
 			}
 		}
-		e.buf = append(e.buf, raw...)
+		e.buf = appendCompactEscapedJSON(e.buf, raw)
 		return nil
 	}
 }

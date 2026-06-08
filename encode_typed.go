@@ -282,8 +282,8 @@ func buildStructEncoder(t reflect.Type) typedEncodeFn {
 			}
 		}
 		// pre-build quoted key
-		firstKey := append([]byte{'"'}, name...)
-		firstKey = append(firstKey, '"', ':')
+		firstKey := appendJSONString(nil, name)
+		firstKey = append(firstKey, ':')
 		commaKey := append([]byte{','}, firstKey...)
 		fields = append(fields, encField{
 			name:   commaKey,

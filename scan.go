@@ -1,8 +1,6 @@
 package jsonx
 
-import (
-	"unsafe"
-)
+import "unsafe"
 
 // hasFastScan reports whether the host has a SIMD string-scan kernel
 // available. Defined per-arch:
@@ -18,29 +16,45 @@ import (
 // false.
 
 // scanString returns the offset of the first byte in p[0:n] that is '"',
-// '\\', or < 0x20. Returns n if none found.
+// '\\', < 0x20, '<', '>', '&', or >= 0x80. The extra encoder-oriented
+// breakpoints are harmless false positives for decode: decode resumes
+// scalar scanning at the returned byte and only treats true JSON string
+// terminators/escapes/control bytes specially.
 //
 // Dispatches to the SIMD kernel when hasFastScan is true and n >= 64
 // (threshold amortises the broadcast/zeroupper setup cost). Falls back
 // to an 8-byte SWAR scan otherwise.
 func scanString(p unsafe.Pointer, n int) int {
+	if n <= 32 {
+		return scanStringTable(p, n)
+	}
 	if hasFastScan && n >= 64 {
 		return scanStringSIMD((*byte)(p), n)
 	}
 	return scanStringSWAR(p, n)
 }
 
+func scanStringTable(p unsafe.Pointer, n int) int {
+	for i := 0; i < n; i++ {
+		c := *(*byte)(unsafe.Pointer(uintptr(p) + uintptr(i)))
+		if !stringSafeSet[c] {
+			return i
+		}
+	}
+	return n
+}
+
 // scanStringSWAR is the pure-Go fallback. 8 bytes at a time via the
-// hasQuoteOrBackslashOrCtl formula from decode.go.
+// stringEncodeBreakMask formula.
 func scanStringSWAR(p unsafe.Pointer, n int) int {
 	i := 0
 	for i+8 <= n {
 		w := *(*uint64)(unsafe.Pointer(uintptr(p) + uintptr(i)))
-		if hasQuoteOrBackslashOrCtl(w) {
+		if stringEncodeBreakMask(w) != 0 {
 			// precise byte position within this 8-byte window
 			for j := 0; j < 8; j++ {
 				c := *(*byte)(unsafe.Pointer(uintptr(p) + uintptr(i+j)))
-				if c == '"' || c == '\\' || c < 0x20 {
+				if !stringSafeSet[c] {
 					return i + j
 				}
 			}
@@ -49,7 +63,7 @@ func scanStringSWAR(p unsafe.Pointer, n int) int {
 	}
 	for i < n {
 		c := *(*byte)(unsafe.Pointer(uintptr(p) + uintptr(i)))
-		if c == '"' || c == '\\' || c < 0x20 {
+		if !stringSafeSet[c] {
 			return i
 		}
 		i++
