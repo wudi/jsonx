@@ -3,6 +3,9 @@ package bench
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/bytedance/sonic"
+	"github.com/go-openapi/spec"
 	"github.com/wudi/jsonx"
 )
 
@@ -42,5 +45,43 @@ func TestDecodeStructLarge(t *testing.T) {
 		if e1.Profile.Projects[0].Tasks[0].AssignedTo.Skills.Experience.Years != e2.Profile.Projects[0].Tasks[0].AssignedTo.Skills.Experience.Years {
 			t.Errorf("expected Years %d, got %d", e2.Profile.Projects[0].Tasks[0].AssignedTo.Skills.Experience.Years, e1.Profile.Projects[0].Tasks[0].AssignedTo.Skills.Experience.Years)
 		}
+	}
+}
+
+func BenchmarkDecodeOpenAPISpec_Stdlib(b *testing.B) {
+	for _, name := range []string{"api.github.com.json", "stripe_openapi_spec3.json"} {
+		data := corpus[name]
+		b.Run(name, func(b *testing.B) {
+			runDecode(b, data, func(d []byte) error {
+				var v spec.SwaggerProps
+
+				return json.Unmarshal(d, &v)
+			})
+		})
+	}
+}
+
+func BenchmarkDecodeOpenAPISpec_Jsonx(b *testing.B) {
+	for _, name := range []string{"api.github.com.json", "stripe_openapi_spec3.json"} {
+		data := corpus[name]
+		b.Run(name, func(b *testing.B) {
+			runDecode(b, data, func(d []byte) error {
+				var v spec.SwaggerProps
+
+				return jsonx.Unmarshal(d, &v)
+			})
+		})
+	}
+}
+func BenchmarkDecodeOpenAPISpec_Sonic(b *testing.B) {
+	for _, name := range []string{"api.github.com.json", "stripe_openapi_spec3.json"} {
+		data := corpus[name]
+		b.Run(name, func(b *testing.B) {
+			runDecode(b, data, func(d []byte) error {
+				var v spec.SwaggerProps
+
+				return sonic.Unmarshal(d, &v)
+			})
+		})
 	}
 }

@@ -15,7 +15,7 @@ import (
 var corpus = map[string][]byte{}
 
 func init() {
-	files := []string{"small.json", "twitter.json", "citm_catalog.json", "canada.json", "1_MB_10_Level_Formatted.json", "5_MB_10_Level_Formatted.json", "10_MB_10_Level_Formatted.json"}
+	files := []string{"small.json", "twitter.json", "citm_catalog.json", "canada.json", "1_MB_10_Level_Formatted.json", "5_MB_10_Level_Formatted.json", "10_MB_10_Level_Formatted.json", "api.github.com.json", "stripe_openapi_spec3.json"}
 	root, _ := os.Getwd()
 	for _, f := range files {
 		b, err := os.ReadFile(filepath.Join(root, "..", "testdata", f))
