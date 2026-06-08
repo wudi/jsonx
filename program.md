@@ -186,3 +186,9 @@ Canada is the remaining wall: 91 % of its floats have 17 digits, so both the dec
 All 7 encode corpora cleanly ≥ 10 % faster than sonic (small, twitter, citm, canada, 1/5/10 MB 10-level formatted). Decode corpora remain mostly ≥ 10 % faster with the usual noise on twitter/citm. Struct decode roughly tied with sonic on this VM.
 
 See `RESULTS.md` for the detailed write-up.
+
+## E20 — real-API `json.Unmarshaler` audit
+
+| # | Hypothesis | Result | Kept |
+|---|------------|--------|------|
+| **E20** | Stop copying raw JSON before calling `UnmarshalJSON`; match `encoding/json`'s contract that implementations copy data themselves if they retain it. | OpenAPI typed decode remains CPU-bound by `go-openapi/spec` calling stdlib internally, but jsonx allocations drop: `api.github.com.json` ~81.97 MB → ~78.60 MB, `stripe_openapi_spec3.json` ~81.07 MB → ~78.60 MB. Focused Unmarshaler/RawMessage tests and `go test ./...` pass. | ✓ |

@@ -355,3 +355,31 @@ inline-friendlier fast paths, decodeString splits — hit the
 no-regression rule, and a good half of round 2 was ruling them out
 rather than landing them. Recording the failures here because the next
 round is likely to be tempted by the same hypotheses.
+
+## Phase 7 — real OpenAPI custom-unmarshaler audit
+
+The new `bench/struct_test.go` OpenAPI benchmarks decode realistic
+`go-openapi/spec.SwaggerProps` targets. Unlike the prior struct benches,
+these types are dominated by custom `UnmarshalJSON` methods inside the
+dependency.
+
+### Experiment
+
+| # | Hypothesis | Result | Kept |
+|---|-----------|--------|------|
+| X11 | Remove jsonx's eager copy before calling `json.Unmarshaler.UnmarshalJSON`; `encoding/json` documents that implementations must copy data themselves if they retain it. | Allocation drops without changing RawMessage behavior: `api.github.com.json` ~81.97 MB → ~78.60 MB, `stripe_openapi_spec3.json` ~81.07 MB → ~78.60 MB. CPU remains effectively tied with sonic because ~95 % of samples are in `go-openapi/spec` methods calling stdlib `encoding/json` internally. | ✓ |
+
+### Post-change OpenAPI decode (`-benchtime=3s -count=3`)
+
+| corpus | sonic median | jsonx median | allocation delta |
+|--------|-------------:|-------------:|-----------------:|
+| `api.github.com.json` | 371 ms | **371 ms** | jsonx −12.5 MB/op |
+| `stripe_openapi_spec3.json` | 261 ms | 266 ms | jsonx −4.4 MB/op |
+
+### Takeaway for OpenAPI
+
+This is not a jsonx parser hot path after the first custom-unmarshaler
+boundary. The useful fix was to avoid doing extra work before handing the
+raw value over; further CPU wins would require either changing the
+`go-openapi/spec` unmarshaler implementation or benchmarking a target
+type that does not immediately delegate back to stdlib.

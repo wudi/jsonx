@@ -129,6 +129,15 @@ func (c *counterUnmarshaler) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type retainingUnmarshaler struct {
+	Raw []byte
+}
+
+func (r *retainingUnmarshaler) UnmarshalJSON(data []byte) error {
+	r.Raw = data
+	return nil
+}
+
 // ----------------------------------------------------------------------------
 // Marshaler encode
 // ----------------------------------------------------------------------------
@@ -272,10 +281,26 @@ func TestUnmarshaler_RawBytesArePreserved(t *testing.T) {
 	if c.Calls != 1 {
 		t.Fatalf("calls = %d", c.Calls)
 	}
-	// The bytes are a COPY, so we can mutate the original safely.
+	if c.Last != `{ "a" :  1 ,  "b":[1,2]}` {
+		t.Fatalf("raw mismatch: %q", c.Last)
+	}
+}
+
+func TestUnmarshaler_RetainedRawBytesFollowStdlibContract(t *testing.T) {
+	// encoding/json documents that UnmarshalJSON implementations must copy
+	// data if they retain it after returning; jsonx should not pre-copy every
+	// raw value on their behalf.
+	src := []byte(`{"a":1}`)
+	var r retainingUnmarshaler
+	if err := Unmarshal(src, &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Raw) == 0 || r.Raw[0] != '{' {
+		t.Fatalf("raw bytes = %q", r.Raw)
+	}
 	src[0] = 'X'
-	if c.Last[0] != '{' {
-		t.Fatalf("bytes not copied: %q", c.Last)
+	if r.Raw[0] != 'X' {
+		t.Fatalf("raw bytes were eagerly copied: %q", r.Raw)
 	}
 }
 

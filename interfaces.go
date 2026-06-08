@@ -54,12 +54,11 @@ func buildUnmarshalerDecoder(t reflect.Type) typedDecodeFn {
 			return err
 		}
 		raw := d.data[start:d.p]
-		// The method may retain the slice (json.RawMessage copies; others may
-		// not), so hand it a fresh copy of the input bytes.
-		dup := make([]byte, len(raw))
-		copy(dup, raw)
+		// Match encoding/json's contract: UnmarshalJSON implementations must
+		// copy data themselves if they retain it after returning. RawMessage
+		// already does that, so avoid an unconditional copy here.
 		u := reflect.NewAt(tt, p).Interface().(json.Unmarshaler)
-		return u.UnmarshalJSON(dup)
+		return u.UnmarshalJSON(raw)
 	}
 }
 
