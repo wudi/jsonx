@@ -192,3 +192,4 @@ See `RESULTS.md` for the detailed write-up.
 | # | Hypothesis | Result | Kept |
 |---|------------|--------|------|
 | **E20** | Stop copying raw JSON before calling `UnmarshalJSON`; match `encoding/json`'s contract that implementations copy data themselves if they retain it. | OpenAPI typed decode remains CPU-bound by `go-openapi/spec` calling stdlib internally, but jsonx allocations drop: `api.github.com.json` ~81.97 MB → ~78.60 MB, `stripe_openapi_spec3.json` ~81.07 MB → ~78.60 MB. Focused Unmarshaler/RawMessage tests and `go test ./...` pass. | ✓ |
+| **E21** | Apply the same retention-contract copy elision to `encoding.TextUnmarshaler`: decode JSON strings with `decodeStringRaw` and pass decoded bytes directly instead of `[]byte(string)`. | Focused bench (`"123-456"`, 3s × 3): jsonx 126–139 ns/op, 56 B/op, 3 allocs/op vs stdlib 204–215 ns/op, 200 B/op, 4 allocs/op. Red/green retention test, full `go test ./...`, and bench-module tests pass. | ✓ |

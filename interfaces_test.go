@@ -83,6 +83,15 @@ func (t *textOnly) UnmarshalText(data []byte) error {
 	return nil
 }
 
+type retainingTextUnmarshaler struct {
+	Raw []byte
+}
+
+func (r *retainingTextUnmarshaler) UnmarshalText(data []byte) error {
+	r.Raw = data
+	return nil
+}
+
 // erroringMarshaler returns an error from MarshalJSON.
 type erroringMarshaler struct{}
 
@@ -355,6 +364,21 @@ func TestTextUnmarshaler_TopLevel(t *testing.T) {
 	}
 }
 
+func TestTextUnmarshaler_RetainedBytesFollowStdlibContract(t *testing.T) {
+	src := []byte(`"abc"`)
+	var v retainingTextUnmarshaler
+	if err := Unmarshal(src, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Raw) == 0 || v.Raw[0] != 'a' {
+		t.Fatalf("raw bytes = %q", v.Raw)
+	}
+	src[1] = 'X'
+	if v.Raw[0] != 'X' {
+		t.Fatalf("text bytes were eagerly copied: %q", v.Raw)
+	}
+}
+
 func TestTextUnmarshaler_RejectsNonString(t *testing.T) {
 	var v textOnly
 	err := Unmarshal([]byte(`42`), &v)
@@ -380,6 +404,28 @@ func TestTextUnmarshaler_NullIsNoop(t *testing.T) {
 	}
 	if v != std {
 		t.Fatalf("null-on-TextUnmarshaler divergence: ours=%+v stdlib=%+v", v, std)
+	}
+}
+
+func BenchmarkTextUnmarshalerDecode_Jsonx(b *testing.B) {
+	data := []byte(`"123-456"`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var v textOnly
+		if err := Unmarshal(data, &v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkTextUnmarshalerDecode_Stdlib(b *testing.B) {
+	data := []byte(`"123-456"`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var v textOnly
+		if err := encjson.Unmarshal(data, &v); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

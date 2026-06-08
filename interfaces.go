@@ -77,12 +77,12 @@ func buildTextUnmarshalerDecoder(t reflect.Type) typedDecodeFn {
 		if d.data[d.p] != '"' {
 			return &UnmarshalTypeError{Value: "non-string", Type: tt, Offset: int64(d.p)}
 		}
-		s, err := d.decodeString()
+		raw, err := d.decodeStringRaw()
 		if err != nil {
 			return err
 		}
 		u := reflect.NewAt(tt, p).Interface().(encoding.TextUnmarshaler)
-		return u.UnmarshalText([]byte(s))
+		return u.UnmarshalText(raw)
 	}
 }
 
