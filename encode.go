@@ -46,6 +46,15 @@ func (e *encoder) encode(v interface{}) error {
 		return e.writeMapInterface(x)
 	case []interface{}:
 		return e.writeSliceInterface(x)
+	case []byte:
+		if x == nil {
+			e.buf = append(e.buf, 'n', 'u', 'l', 'l')
+			return nil
+		}
+		e.buf = append(e.buf, '"')
+		e.buf = base64Encode(e.buf, x)
+		e.buf = append(e.buf, '"')
+		return nil
 	}
 	rv := reflect.ValueOf(v)
 	enc := cachedEncoder(rv.Type())

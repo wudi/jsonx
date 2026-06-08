@@ -152,6 +152,51 @@ func BenchmarkUnmarshalEscapedByteSlice_Stdlib(b *testing.B) {
 	}
 }
 
+func TestMarshalByteSliceAvoidsBase64TempSlice(t *testing.T) {
+	v := []byte("Hello, world!")
+	warm, err := Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(warm) != `"SGVsbG8sIHdvcmxkIQ=="` {
+		t.Fatalf("encoded %q", warm)
+	}
+
+	var out []byte
+	allocs := testing.AllocsPerRun(1000, func() {
+		out, err = Marshal(v)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `"SGVsbG8sIHdvcmxkIQ=="` {
+		t.Fatalf("encoded %q", out)
+	}
+	if allocs > 2 {
+		t.Fatalf("allocs = %.0f, want <= 2", allocs)
+	}
+}
+
+func BenchmarkMarshalByteSlice_Jsonx(b *testing.B) {
+	v := []byte("Hello, world!")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarshalByteSlice_Stdlib(b *testing.B) {
+	v := []byte("Hello, world!")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := encjson.Marshal(v); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // TestValid mirrors encoding/json's TestValid (scanner_test.go): a hand-picked
 // table of valid/invalid inputs. We then cross-check every case against the
 // stdlib so divergence (in either direction) is a test failure.
